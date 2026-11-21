@@ -1,0 +1,46 @@
+# Actions → "Build mosque data" → Run workflow
+# Geofabrik سے پاکستان کا تازہ OSM ڈیٹا اتار کر مسجدیں نکالتا ہے اور data/ میں tile فائلیں بنا کر commit کر دیتا ہے۔
+# ہر مہینے خود بھی چلتا ہے۔
+name: Build mosque data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 1 * *"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install osmium
+        run: sudo apt-get update && sudo apt-get install -y osmium-tool
+
+      - name: Download Pakistan OSM extract
+        run: |
+          curl -fL --retry 3 -o pakistan.osm.pbf https://download.geofabrik.de/asia/pakistan-latest.osm.pbf
+          ls -lh pakistan.osm.pbf
+
+      - name: Extract mosques
+        run: |
+          osmium tags-filter pakistan.osm.pbf \
+            nwr/amenity=place_of_worship nwr/amenity=mosque nwr/building=mosque \
+            -o mosques.osm.pbf --overwrite
+          osmium export mosques.osm.pbf -f geojsonseq -o mosques.geojsonseq --overwrite
+          ls -lh mosques.geojsonseq
+
+      - name: Build tiles
+        run: python3 scripts/build_tiles.py mosques.geojsonseq data
+
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet && echo "کوئی تبدیلی نہیں" && exit 0
+          git commit -m "Update mosque data"
+          git push
